@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include "utils.h"
 
 #define HIGHEST_PRIORITY 1
 
@@ -49,14 +50,22 @@ void enqueue_process(struct scheduler_req_t *msg);
 int get_scheduler_msg_queue();
 
 int main(int argc, char *argv[]) {
+  int shell_sem_id = get_shell_semaphore();
+
   if (strcmp(argv[1], "2") == 0) {
     num_of_queues = 2;
   } else if (strcmp(argv[1], "3") == 0) {
     num_of_queues = 3;
   } else {
-    printf("Error: Invalid argument for user_scheduler. Can only create 2 or 3 queues!\n");
+    printf(
+      "\033[1;31mERRO!!!\033[0m Argumento inválido para 'user_scheduler'. Só é possível criar 2 ou 3 filas.\n"
+    );
+    up_sem(shell_sem_id);
     exit(1);
   }
+
+  printf("\nProcesso 'user_scheduler' inicializado com %d filas.\n", num_of_queues);
+  up_sem(shell_sem_id);
 
   int msq_id = get_scheduler_msg_queue();
 

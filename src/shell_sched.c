@@ -12,15 +12,25 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include<sys/types.h>
+#include<sys/ipc.h>
+#include<sys/sem.h>
+#include "./utils.h"
 
 #define MAX_COMANDO 256
 
-void shell_sched() {
+void user_scheduler(char *n_queues);
+
+int main() {
     char comando[MAX_COMANDO];
     char *token, *n_queues, *command, *priority;
 
+    int shell_sem_id = get_shell_semaphore();
+    semctl(shell_sem_id, 0, SETVAL, 0);
+
     while(1) {
-        printf(">shell_sched: ");
+        printf("\n>shell_sched: ");
         
         if (fgets(comando, MAX_COMANDO, stdin) == NULL){
             printf("\n\033[1;31mERRO!!!\033[0m Falha na leitura do comando!\n");
@@ -38,20 +48,19 @@ void shell_sched() {
             
             if (n_queues == NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi recebido menos argumentos que o esperado!\n");
-                printf("Utilização:\n\nuser_scheduler <number_of_queues>\n");
+                printf("Utilização: user_scheduler <number_of_queues>\n");
                 continue;
             }
             
             token = strtok(NULL, " ");
             if (token != NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi passado mais argumentos que o esperado!\n");
-                printf("Utilização:\n\nuser_scheduler <number_of_queues>\n");
+                printf("Utilização: user_scheduler <number_of_queues>\n");
                 continue;
             }
-            
-            printf("Numero de filas: %s\n", n_queues);
 
-            //user_scheduler(n_queues);
+            user_scheduler(n_queues);
+            down_sem(shell_sem_id); // Espera até que o user_scheduler seja inicializado
         }
         else if (strcmp(token, "execute_process") == 0){
             command = strtok(NULL, " ");
@@ -97,4 +106,14 @@ void shell_sched() {
             printf("\033[1;31mERRO!!!\033[0m Comando não reconhecido!\n"); 
         }
     }
-} 
+    return 0;
+}
+
+void user_scheduler(char *n_queues) {
+    int pid = fork();
+    if (pid == 0) {
+        execl("./out/user_scheduler", "user_scheduler", n_queues, NULL);
+        printf("\033[1;31mERRO!!!\033[0m Não foi possível criar o processo 'user_scheduler'!\n");
+        exit(1);
+    }
+}
