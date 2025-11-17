@@ -19,41 +19,37 @@
 #include <unistd.h>
 #include <errno.h>
 #include "utils.h"
+#include "scheduler.h"
+#include <sys/wait.h>
+
 
 #define QUANTUM_SECONDS 4
-#define HIGHEST_PRIORITY 1
-
-struct process_t {
-  char program_name[100];
-  int pid;
-  int priority;
-  struct process_t *next;
-  struct process_t *previous;
-};
-
-#define SCHED_MSQ_KEY 0x4272
-#define SCHED_MSG_SIZE 100
-
-// Requisição de escalonamento. O mtext deve ser uma string no formato:
-// "<nome_do_programa> <prioridade>"
-struct scheduler_req_t {
-  long mtype;
-  char mtext[SCHED_MSG_SIZE];
-};
 
 // Até 3 filas de processos são possíveis. Cada elemento do array representa a cabeça de uma dessas filas.
 // process_queues[0] -> Processos de prioridade 1
 // process_queues[1] -> Processos de prioridade 0
 // process_queues[2] -> Processos de prioridade -1
 struct process_t *process_queues[3];
-
 struct process_t *current_process = NULL;
 int num_of_queues;
+int num_of_queues = 0;
+int msqid = -1;
+int semid = -1;
 
 int receive_scheduling_req(int msq_id, struct scheduler_req_t *msg);
 void enqueue_process(struct scheduler_req_t *msg);
 int get_scheduler_msg_queue();
-void execute_scheduling();
+void execute_scheduling(int sig);
+void handle_sigchld(int sig);
+
+double compute_turnaround(struct process_t *p) {
+    if(p==NULL) return -1.0;
+    if(!p->finished) return -1.0;
+
+    double start = p->arrival_time.tv_sec + p->arrival_time.tv_nsec / 1e9;
+    double end   = p->finish_time.tv_sec + p->finish_time.tv_nsec / 1e9;
+    return end - start;
+}
 
 int main(int argc, char *argv[]) {
   int shell_sem_id = get_shell_semaphore();
@@ -71,6 +67,7 @@ int main(int argc, char *argv[]) {
   }
 
   signal(SIGALRM, execute_scheduling);
+  signal(SIGCHLD, handle_sigchld);
   alarm(QUANTUM_SECONDS); // O escalonador será acordado em QUANTUM_SECONDS segundos
 
   printf("\nProcesso 'user_scheduler' inicializado com %d filas.\n", num_of_queues);
@@ -80,9 +77,15 @@ int main(int argc, char *argv[]) {
 
   struct scheduler_req_t msg;
   while (1) {
-    if (receive_scheduling_req(msq_id, &msg)) {
-      enqueue_process(&msg);
+    if (!receive_scheduling_req(msq_id, &msg)) continue;
+    
+    if(msg.mtype == 1) enqueue_process(&msg);
+    else if(msg.mtype == 2) list_scheduler();
+    else if(msg.mtype == 3){
+      exit_scheduler();
+      exit(0);
     }
+    
   }
   return 0;
 }
@@ -90,7 +93,7 @@ int main(int argc, char *argv[]) {
 // Recebe uma requisição de escalonamento. Retorna 0 caso não tenha recebido
 // nenhuma mensagem, retorna 1 caso contrário.
 int receive_scheduling_req(int msq_id, struct scheduler_req_t *msg) {
-  int res = msgrcv(msq_id, msg, SCHED_MSG_SIZE, 1, 0);
+  int res = msgrcv(msq_id, msg, SCHED_MSG_SIZE, 0, 0);
   if (res == -1) {
     // O escalonador pode receber a interrupção SIGALRM enquanto ele estiver esperando
     // pela mensagem. Nesse caso, a fila de mensagens vai retornar um erro EINTR (de interrupção),
@@ -131,6 +134,9 @@ void enqueue_process(struct scheduler_req_t *msg) {
   new_process->pid = process_pid;
   new_process->next = NULL;
   new_process->previous = NULL;
+  new_process->finished = 0;
+
+  clock_gettime(CLOCK_MONOTONIC, &new_process->arrival_time);
 
   int queue_index = HIGHEST_PRIORITY - priority;
 
@@ -148,7 +154,7 @@ void enqueue_process(struct scheduler_req_t *msg) {
   if (current_process != NULL && current_process->priority < priority) {
     // Se o novo processo tiver uma prioridade maior, então realizamos
     // o escalonamento novamente para que ele seja escolhido
-    execute_scheduling();
+    execute_scheduling(0);
   } else {
     alarm(remaining_quantum);
   }
@@ -156,7 +162,7 @@ void enqueue_process(struct scheduler_req_t *msg) {
 
 // Executa o escalonamento dos processos, escolhendo o processo de
 // maior prioridade para ser executado.
-void execute_scheduling() {
+void execute_scheduling(int sig) {
   alarm(0);
   if (current_process != NULL) {
     kill(current_process->pid, SIGSTOP);
@@ -183,4 +189,27 @@ int get_scheduler_msg_queue() {
     exit(1);
   }
   return msq_id;
+}
+
+void handle_sigchld(int sig){
+  int status;
+  pid_t pid;
+
+  while((pid = waitpid(-1, &status, WNOHANG))>0){
+    if(current_process && current_process->pid == pid){
+      current_process->finished=1;
+      clock_gettime(CLOCK_MONOTONIC, &current_process->finish_time);
+    }
+    for(int i=0; i<num_of_queues;i++){
+      struct process_t *p=process_queues[i];
+      while(p!=NULL){
+        if(p->pid==pid){
+          p->finished=1;
+          clock_gettime(CLOCK_MONOTONIC, &p->finish_time);
+          break;
+        }
+        p=p->next;
+      }
+    }
+  }
 }

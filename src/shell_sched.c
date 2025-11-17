@@ -17,6 +17,8 @@
 #include<sys/ipc.h>
 #include<sys/sem.h>
 #include "./utils.h"
+#include <sys/msg.h>
+#include "./scheduler.h"
 
 #define MAX_COMANDO 256
 
@@ -80,6 +82,12 @@ int main() {
             }
 
             //execute_process(command, priority);
+            int msq_id = msgget(SCHED_MSQ_KEY, 0);
+            struct scheduler_req_t msg;
+
+            msg.mtype=1;
+            snprintf(msg.mtext, SCHED_MSG_SIZE, "%s %s", command, priority);
+            msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
         }
         else if (strcmp(token, "list_scheduler") == 0){
             token = strtok(NULL, " ");
@@ -90,6 +98,12 @@ int main() {
             }
             
             //list_scheduler();
+            int msq_id = msgget(SCHED_MSQ_KEY, 0);
+            struct scheduler_req_t msg;
+
+            msg.mtype=2;
+            msg.mtext[0]= '\0';
+            msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
         }
         else if (strcmp(token, "exit_scheduler") == 0){
             token = strtok(NULL, " ");
@@ -100,6 +114,12 @@ int main() {
             }
             
             //exit_scheduler();
+            int msq_id = msgget(SCHED_MSQ_KEY, 0);
+            struct scheduler_req_t msg;
+
+            msg.mtype=3;
+            msg.mtext[0]= '\0';
+            msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
             break;
         }
         else{
