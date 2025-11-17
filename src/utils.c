@@ -3,8 +3,7 @@
 #include<sys/types.h>
 #include<sys/ipc.h>
 #include<sys/sem.h>
-
-#define SHELL_SEM_KEY 0x2110
+#include "utils.h"
 
 int get_shell_semaphore() {
     int sem_id = semget(SHELL_SEM_KEY, 1, IPC_CREAT | 0x1FF);

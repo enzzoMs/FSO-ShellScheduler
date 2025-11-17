@@ -16,13 +16,11 @@
 #include<sys/types.h>
 #include<sys/ipc.h>
 #include<sys/sem.h>
-#include "./utils.h"
 #include <sys/msg.h>
-#include "./scheduler.h"
+#include <sys/wait.h>
+#include "./utils.h"
 
 #define MAX_COMANDO 256
-
-void user_scheduler(char *n_queues);
 
 int main() {
     char comando[MAX_COMANDO];
@@ -31,7 +29,9 @@ int main() {
     int shell_sem_id = get_shell_semaphore();
     semctl(shell_sem_id, 0, SETVAL, 0);
 
-    while(1) {
+    int user_scheduler_pid = -1;
+
+    while (1) {
         printf("\n>shell_sched: ");
         
         if (fgets(comando, MAX_COMANDO, stdin) == NULL){
@@ -61,7 +61,14 @@ int main() {
                 continue;
             }
 
-            user_scheduler(n_queues);
+            int pid = fork();
+            if (pid == 0) {
+                user_scheduler_pid = pid;
+                execl("./out/user_scheduler", "user_scheduler", n_queues, NULL);
+                printf("\033[1;31mERRO!!!\033[0m Não foi possível criar o processo 'user_scheduler'!\n");
+                exit(1);
+            }
+
             down_sem(shell_sem_id); // Espera até que o user_scheduler seja inicializado
         }
         else if (strcmp(token, "execute_process") == 0){
@@ -70,70 +77,68 @@ int main() {
             
             if (command == NULL || priority == NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi recebido menos argumentos que o esperado!\n");
-                printf("Utilização:\n\nexecute_process <command priority>\n");
+                printf("Utilização: execute_process <command> <priority>\n");
                 continue;
             }
             
             token = strtok(NULL, " ");
             if (token != NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi passado mais argumentos que o esperado!\n");
-                printf("Utilização:\n\nexecute_process <command priority>\n");
+                printf("Utilização: execute_process <command> <priority>\n");
                 continue;
             }
 
-            //execute_process(command, priority);
             int msq_id = msgget(SCHED_MSQ_KEY, 0);
             struct scheduler_req_t msg;
 
-            msg.mtype=1;
+            msg.mtype = 1;
             snprintf(msg.mtext, SCHED_MSG_SIZE, "%s %s", command, priority);
             msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
+
+            down_sem(shell_sem_id); // Espera até que o comando termine
         }
         else if (strcmp(token, "list_scheduler") == 0){
             token = strtok(NULL, " ");
             if (token != NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi passado mais argumentos que o esperado!\n");
-                printf("Utilização:\n\nlist_scheduler\n");
+                printf("Utilização: list_scheduler\n");
                 continue;
             }
-            
-            //list_scheduler();
+
             int msq_id = msgget(SCHED_MSQ_KEY, 0);
             struct scheduler_req_t msg;
 
-            msg.mtype=2;
-            msg.mtext[0]= '\0';
+            msg.mtype = 2;
+            msg.mtext[0] = '\0';
             msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
+
+            down_sem(shell_sem_id); // Espera até que o comando termine
         }
         else if (strcmp(token, "exit_scheduler") == 0){
             token = strtok(NULL, " ");
             if (token != NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi passado mais argumentos que o esperado!\n");
-                printf("Utilização:\n\nexit_scheduler\n");
+                printf("Utilização: exit_scheduler\n");
                 continue;
             }
             
-            //exit_scheduler();
             int msq_id = msgget(SCHED_MSQ_KEY, 0);
             struct scheduler_req_t msg;
 
-            msg.mtype=3;
-            msg.mtext[0]= '\0';
+            msg.mtype = 3;
+            msg.mtext[0] = '\0';
             msgsnd(msq_id, &msg, SCHED_MSG_SIZE, 0);
+
+            // Espera o escalonador terminar
+            if (user_scheduler_pid != -1) {
+                int status;
+                wait(&status);
+            }
             break;
         }
-        else{
+        else {
             printf("\033[1;31mERRO!!!\033[0m Comando não reconhecido!\n"); 
         }
     }
     return 0;
-}
-
-void user_scheduler(char *n_queues) {
-    int pid = fork();
-    if (pid == 0) {
-        execl("./out/user_scheduler", "user_scheduler", n_queues, NULL);
-        printf("\033[1;31mERRO!!!\033[0m Não foi possível criar o processo 'user_scheduler'!\n");
-        exit(1);
-    }
 }

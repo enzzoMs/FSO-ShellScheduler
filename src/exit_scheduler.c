@@ -5,7 +5,8 @@
 #include <sys/sem.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include "scheduler.h"
+#include <time.h>
+#include "utils.h"
 
 static void kill_if_alive(struct process_t *p) {
     if (!p) return;
@@ -24,16 +25,17 @@ static void kill_if_alive(struct process_t *p) {
     }
 }
 
-void exit_scheduler(void) {
-
+void exit_scheduler(
+    struct process_t *current_process, struct process_t process_queues[], int num_of_queues
+) {
     printf("\n========== ENCERRANDO ESCALONADOR ==========\n");
 
     /* 1 — Finalizar processo atual */
     if (current_process) {
         printf("Finalizando processo atual: %s (PID=%d)\n",
-               current_process->program_name,
-               current_process->pid);
-
+           current_process->program_name,
+           current_process->pid
+        );
         kill_if_alive(current_process);
     }
 
@@ -44,27 +46,24 @@ void exit_scheduler(void) {
    
     /* 3 — Finalizar processos das filas */
     for (int i = 0; i < num_of_queues; i++) {
-        struct process_t *p = process_queues[i];
+        struct process_t *p = &process_queues[i];
 
         while (p != NULL) {
-            struct process_t *next = p->next;
-
             printf("Encerrando processo: %s (PID=%d)\n",
                    p->program_name, p->pid);
 
             kill_if_alive(p);
 
+            struct process_t *next = p->next;
             free(p);
             p = next;
         }
-
-        process_queues[i] = NULL;
     }
 
     /* 4 — Remover fila de mensagens */
-    if (msqid >= 0) {
+    if (msq_id >= 0) {
         printf("Removendo fila de mensagens...\n");
-        msgctl(msqid, IPC_RMID, NULL);
+        msgctl(msq_id, IPC_RMID, NULL);
     }
 
     /* 5 — Remover semáforo */

@@ -18,10 +18,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
-#include "utils.h"
-#include "scheduler.h"
+#include <time.h>
 #include <sys/wait.h>
-
+#include "utils.h"
 
 #define QUANTUM_SECONDS 4
 
@@ -29,27 +28,19 @@
 // process_queues[0] -> Processos de prioridade 1
 // process_queues[1] -> Processos de prioridade 0
 // process_queues[2] -> Processos de prioridade -1
-struct process_t *process_queues[3];
+struct process_t *process_queues[3] = { NULL, NULL, NULL };
 struct process_t *current_process = NULL;
 int num_of_queues;
-int num_of_queues = 0;
-int msqid = -1;
-int semid = -1;
 
 int receive_scheduling_req(int msq_id, struct scheduler_req_t *msg);
 void enqueue_process(struct scheduler_req_t *msg);
 int get_scheduler_msg_queue();
-void execute_scheduling(int sig);
-void handle_sigchld(int sig);
+void execute_scheduling();
+void execute_round_robin();
+void handle_process_termination();
 
-double compute_turnaround(struct process_t *p) {
-    if(p==NULL) return -1.0;
-    if(!p->finished) return -1.0;
-
-    double start = p->arrival_time.tv_sec + p->arrival_time.tv_nsec / 1e9;
-    double end   = p->finish_time.tv_sec + p->finish_time.tv_nsec / 1e9;
-    return end - start;
-}
+void list_scheduler(struct process_t *current_process, struct process_t *process_queues[], int num_of_queues);
+void exit_scheduler(); // TODO: Arrumar isso
 
 int main(int argc, char *argv[]) {
   int shell_sem_id = get_shell_semaphore();
@@ -67,7 +58,7 @@ int main(int argc, char *argv[]) {
   }
 
   signal(SIGALRM, execute_scheduling);
-  signal(SIGCHLD, handle_sigchld);
+  signal(SIGCHLD, handle_process_termination);
   alarm(QUANTUM_SECONDS); // O escalonador será acordado em QUANTUM_SECONDS segundos
 
   printf("\nProcesso 'user_scheduler' inicializado com %d filas.\n", num_of_queues);
@@ -79,13 +70,16 @@ int main(int argc, char *argv[]) {
   while (1) {
     if (!receive_scheduling_req(msq_id, &msg)) continue;
     
-    if(msg.mtype == 1) enqueue_process(&msg);
-    else if(msg.mtype == 2) list_scheduler();
-    else if(msg.mtype == 3){
+    if (msg.mtype == 1) {
+      enqueue_process(&msg);
+      up_sem(shell_sem_id);
+    } else if (msg.mtype == 2) {
+      list_scheduler(current_process, process_queues, num_of_queues);
+      up_sem(shell_sem_id);
+    } else if (msg.mtype == 3) {
       exit_scheduler();
       exit(0);
     }
-    
   }
   return 0;
 }
@@ -116,7 +110,7 @@ void enqueue_process(struct scheduler_req_t *msg) {
   int priority = strtol(strtok(NULL, " "), NULL, 10);
 
   if (priority > HIGHEST_PRIORITY || priority <= HIGHEST_PRIORITY - num_of_queues) {
-    printf("Error: Invalid priority for program %s!", program_name);
+    printf("Erro: Prioridade inválida para o programa %s!", program_name);
     return;
   }
 
@@ -124,37 +118,35 @@ void enqueue_process(struct scheduler_req_t *msg) {
   if (process_pid == 0) {
     raise(SIGSTOP);  // O novo processo começa parado
     execl(program_name, program_name, NULL);
-    printf("\nError: Can't execute program '%s'!\n", program_name);
+    printf("\nErro: Não foi possível executar o programa '%s'!\n", program_name);
     exit(1);
   }
 
   struct process_t *new_process = malloc(sizeof(struct process_t));
   strcpy(new_process->program_name, program_name);
+  clock_gettime(CLOCK_MONOTONIC, &new_process->arrival_time);
   new_process->priority = priority;
   new_process->pid = process_pid;
   new_process->next = NULL;
-  new_process->previous = NULL;
   new_process->finished = 0;
-
-  clock_gettime(CLOCK_MONOTONIC, &new_process->arrival_time);
+  new_process->turnaround = 0;
 
   int queue_index = HIGHEST_PRIORITY - priority;
 
   if (process_queues[queue_index] == NULL) {
     process_queues[queue_index] = new_process;
   } else {
-    struct process_t *temp = process_queues[queue_index];
-    while (temp->next != NULL) {
-      temp = temp->next;
+    struct process_t *p = process_queues[queue_index];
+    while (p->next != NULL) {
+      p = p->next;
     }
-    temp->next = new_process;
-    new_process->previous = temp;
+    p->next = new_process;
   }
 
   if (current_process != NULL && current_process->priority < priority) {
     // Se o novo processo tiver uma prioridade maior, então realizamos
     // o escalonamento novamente para que ele seja escolhido
-    execute_scheduling(0);
+    execute_scheduling();
   } else {
     alarm(remaining_quantum);
   }
@@ -162,18 +154,30 @@ void enqueue_process(struct scheduler_req_t *msg) {
 
 // Executa o escalonamento dos processos, escolhendo o processo de
 // maior prioridade para ser executado.
-void execute_scheduling(int sig) {
+void execute_scheduling() {
   alarm(0);
   if (current_process != NULL) {
     kill(current_process->pid, SIGSTOP);
+    execute_round_robin();
   }
+
+  // Escolhe o próximo processo a ser executado
   struct process_t *next_process = NULL;
+
   for (int i = 0; i < num_of_queues; i++) {
-    if (process_queues[i] != NULL) {
-      next_process = process_queues[i];
+    struct process_t *p = process_queues[i];
+    while (p != NULL) {
+      if (p->finished == 0) {
+        next_process = p;
+        break;
+      }
+      p = p->next;
+    }
+    if (next_process != NULL) {
       break;
     }
   }
+
   current_process = next_process;
   if (next_process != NULL) {
     kill(next_process->pid, SIGCONT);
@@ -181,35 +185,88 @@ void execute_scheduling(int sig) {
   alarm(QUANTUM_SECONDS);
 }
 
+// Coloca o processo atual no final da sua fila de prioridade
+void execute_round_robin() {
+  int queue_index = HIGHEST_PRIORITY - current_process->priority;
+
+  // Primeiro removemos o processo da fila
+  struct process_t *prev = NULL;
+  struct process_t *p = process_queues[queue_index];
+
+  while (p != NULL) {
+    if (p == current_process) {
+      if (prev == NULL) {
+        process_queues[queue_index] = current_process->next;
+      } else {
+        prev->next = current_process->next;
+      }
+      break;
+    }
+    prev = p;
+    p = p->next;
+  }
+
+  // Agora inserimos o processo no fila da fila novamente
+  if (process_queues[queue_index] == NULL) {
+    process_queues[queue_index] = current_process;
+  } else {
+    struct process_t *p = process_queues[queue_index];
+    while (p->next != NULL) {
+      p = p->next;
+    }
+    p->next = current_process;
+  }
+  current_process->next = NULL;
+}
+
+// Atualiza nas filas de prioridade quais processos terminaram, realizando
+// o cálculo do tempo de turnaround
+void handle_process_termination() {
+  // Reseta o relógio para impedir que o escalonador seja interrompido
+  // enquanto ele faz a atualização das filas
+  int remaining_quantum = alarm(0);
+
+  int status;
+  pid_t pid;
+
+  int should_exec_scheduling = 0;
+
+  while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    if (current_process && current_process->pid == pid) {
+      should_exec_scheduling = 1;
+    }
+
+    for (int i = 0; i < num_of_queues; i++) {
+      struct process_t *p = process_queues[i];
+      while (p != NULL) {
+        if (p->pid == pid) {
+          p->finished = 1;
+          clock_gettime(CLOCK_MONOTONIC, &p->finish_time);
+
+          double start = p->arrival_time.tv_sec + p->arrival_time.tv_nsec / 1e9;
+          double end   = p->finish_time.tv_sec + p->finish_time.tv_nsec / 1e9;
+          p->turnaround = end - start;
+
+          break;
+        }
+        p = p->next;
+      }
+    }
+  }
+
+  if (should_exec_scheduling) {
+    execute_scheduling();
+  } else {
+    alarm(remaining_quantum);
+  }
+}
+
 // Cria e retorna o identificador da fila de mensagens do escalonador.
 int get_scheduler_msg_queue() {
   int msq_id = msgget(SCHED_MSQ_KEY, IPC_CREAT | 0x1FF);
   if (msq_id < 0) {
-    printf("\nError: Unable to create message queue!\n");
+    printf("\nErro: Não foi possível criar a fila de mensagens do escalonador!\n");
     exit(1);
   }
   return msq_id;
-}
-
-void handle_sigchld(int sig){
-  int status;
-  pid_t pid;
-
-  while((pid = waitpid(-1, &status, WNOHANG))>0){
-    if(current_process && current_process->pid == pid){
-      current_process->finished=1;
-      clock_gettime(CLOCK_MONOTONIC, &current_process->finish_time);
-    }
-    for(int i=0; i<num_of_queues;i++){
-      struct process_t *p=process_queues[i];
-      while(p!=NULL){
-        if(p->pid==pid){
-          p->finished=1;
-          clock_gettime(CLOCK_MONOTONIC, &p->finish_time);
-          break;
-        }
-        p=p->next;
-      }
-    }
-  }
 }
