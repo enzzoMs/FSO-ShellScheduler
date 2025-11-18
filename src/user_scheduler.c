@@ -40,7 +40,7 @@ void execute_round_robin();
 void handle_process_termination();
 
 void list_scheduler(struct process_t *current_process, struct process_t *process_queues[], int num_of_queues);
-void exit_scheduler(); // TODO: Arrumar isso
+void exit_scheduler(struct process_t *current_process, struct process_t *process_queues[], int num_of_queues); // TODO: Arrumar isso
 
 int main(int argc, char *argv[]) {
   int shell_sem_id = get_shell_semaphore();
@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
       list_scheduler(current_process, process_queues, num_of_queues);
       up_sem(shell_sem_id);
     } else if (msg.mtype == 3) {
-      exit_scheduler();
+      exit_scheduler(current_process, process_queues, num_of_queues);
       exit(0);
     }
   }

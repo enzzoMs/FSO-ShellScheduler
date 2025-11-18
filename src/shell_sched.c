@@ -134,7 +134,7 @@ int main() {
                 int status;
                 wait(&status);
             }
-            break;
+            break; 
         }
         else {
             printf("\033[1;31mERRO!!!\033[0m Comando não reconhecido!\n"); 
