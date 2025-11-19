@@ -41,12 +41,12 @@ Após a compilação, inicie o shell:
 
 Comandos disponíveis no shell_sched:
 
-| Comando                                    | Descrição                                                 |
-| ------------------------------------------ | --------------------------------------------------------- |
-| `user_scheduler <number_of_queues>` | Cria o processo escalonador com 2 ou 3 filas round-robin.             |
-| `execute_process <program> <priority>`       | Envia um novo processo para o escalonador com uma determinada prioridade.                |
-| `list_scheduler`                           | Mostra o estado atual das filas e o processo em execução. |
-| `exit_scheduler`                           | Finaliza o escalonador e exibe o tempo de turnaround de cada processo.     |
+| Comando                                | Descrição                                                 |
+|----------------------------------------| --------------------------------------------------------- |
+| `create_user_scheduler <number_of_queues>`   | Cria o processo escalonador com 2 ou 3 filas round-robin.             |
+| `execute_process <program> <priority>` | Envia um novo processo para o escalonador com uma determinada prioridade.                |
+| `list_scheduler`                       | Mostra o estado atual das filas e o processo em execução. |
+| `exit_scheduler`                       | Finaliza o escalonador e exibe o tempo de turnaround de cada processo.     |
 
 ## Autores
 

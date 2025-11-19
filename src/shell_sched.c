@@ -45,19 +45,19 @@ int main() {
         if (token == NULL){
             continue;
         }
-        else if (strcmp(token, "user_scheduler") == 0){
+        else if (strcmp(token, "create_user_scheduler") == 0){
             n_queues = strtok(NULL, " ");
             
             if (n_queues == NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi recebido menos argumentos que o esperado!\n");
-                printf("Utilização: user_scheduler <number_of_queues>\n");
+                printf("Utilização: create_user_scheduler <number_of_queues>\n");
                 continue;
             }
             
             token = strtok(NULL, " ");
             if (token != NULL){
                 printf("\033[1;31mERRO!!!\033[0m Foi passado mais argumentos que o esperado!\n");
-                printf("Utilização: user_scheduler <number_of_queues>\n");
+                printf("Utilização: create_user_scheduler <number_of_queues>\n");
                 continue;
             }
 
