@@ -63,11 +63,11 @@ int main() {
 
             int pid = fork();
             if (pid == 0) {
-                user_scheduler_pid = pid;
                 execl("./out/user_scheduler", "user_scheduler", n_queues, NULL);
                 printf("\033[1;31mERRO!!!\033[0m Não foi possível criar o processo 'user_scheduler'!\n");
                 exit(1);
             }
+            user_scheduler_pid = pid;
 
             down_sem(shell_sem_id); // Espera até que o user_scheduler seja inicializado
         }
@@ -133,6 +133,7 @@ int main() {
             if (user_scheduler_pid != -1) {
                 int status;
                 wait(&status);
+
             }
             break; 
         }

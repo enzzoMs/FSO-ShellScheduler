@@ -61,7 +61,7 @@ void exit_scheduler(
                 struct process_t *next = p->next;
 
                 if (p != current_process){
-                    printf("Fila %d | Proc: %s (PID %d) | ", , p->program_name, p->pid);
+                    printf("Fila %d | Proc: %s (PID %d) | ", HIGHEST_PRIORITY - i, p->program_name, p->pid);
         
                     if (p->finished) {
                         printf("STATUS: FINALIZADO. Turnaround: %.6f s\n", p->turnaround);
@@ -78,6 +78,8 @@ void exit_scheduler(
             process_queues[i] = NULL;
         }
 
+    printf("\n=======================================\n\n");
+
     /* 4 — Remover fila de mensagens */
     int msq_id = get_scheduler_msg_queue();
     if (msq_id >= 0) {
@@ -91,6 +93,7 @@ void exit_scheduler(
         printf("Removendo semáforo...\n");
         semctl(semid, 0, IPC_RMID);
     }
-    printf("Encerramento concluído.\n");
-    printf("=======================================\n\n");
+
+    printf("\nEncerramento concluído.\n");
+    printf("\n=======================================\n\n");
 }
